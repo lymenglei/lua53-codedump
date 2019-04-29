@@ -21,7 +21,9 @@
 
 lobject.h
 
-72行，迎来了首个比较重要的数据结构`GCObject`，另外`CommonHeader`中的tt字段，可以理解为是用来标记lua8中数据类型，故：
+#### GCObject Value TValue
+
+72行，迎来了首个比较重要的数据结构`GCObject`，另外`CommonHeader`中的tt字段，可以理解为是用来标记lua 8种数据类型，故：
 ```c
 // 展开之后
 struct GCObject {
@@ -78,6 +80,14 @@ typedef struct lua_TValue
 
 
 其它类型，string table Closure(闭包) Proto 暂时先不介绍，等到后面具体到某个类型在介绍。先了解这么多就可以了，因为后面忘了还是会回来重新看这些宏定义的。
+
+#### lua_State
+
+另外还需要了解一个概念，就是`lua_State`，这是lua里的一个线程。定义在lstate.h
+这里面有个`global_State`对象，理解为全局量都保存在这里。
+后面介绍的 字符串 全部都保存在global_State的strt这个hash表中
+
+
 
 ------------------
 
