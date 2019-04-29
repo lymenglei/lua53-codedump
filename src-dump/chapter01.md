@@ -88,6 +88,61 @@ typedef struct lua_TValue
 后面介绍的 字符串 全部都保存在global_State的strt这个hash表中
 
 
+#### 通用的申请内存空间函数
+在global_State中，有个
+```c
+lua_Alloc frealloc;  /* function to reallocate memory */
+```
+字段，这是一个函数指针，最开始看了好久都没太看懂这里是什么意思。
+在strt的resize以及table的resize函数里，都会有看到类似的代码，去申请一块内存空间。
+最终都会调用到如下部分：
+```c
+/*
+** generic allocation routine.
+*/
+void *luaM_realloc_ (lua_State *L, void *block, size_t osize, size_t nsize) {
+  void *newblock;
+  global_State *g = G(L);
+  size_t realosize = (block) ? osize : 0;
+  lua_assert((realosize == 0) == (block == NULL));
+#if defined(HARDMEMTESTS)
+  if (nsize > realosize && g->gcrunning)
+    luaC_fullgc(L, 1);  /* force a GC whenever possible */
+#endif
+  newblock = (*g->frealloc)(g->ud, block, osize, nsize);
+  if (newblock == NULL && nsize > 0) {
+    lua_assert(nsize > realosize);  /* cannot fail when shrinking a block */
+    if (g->version) {  /* is state fully built? */
+      luaC_fullgc(L, 1);  /* try to free some memory... */
+      newblock = (*g->frealloc)(g->ud, block, osize, nsize);  /* try again */
+    }
+    if (newblock == NULL)
+      luaD_throw(L, LUA_ERRMEM);
+  }
+  lua_assert((nsize == 0) == (newblock == NULL));
+  g->GCdebt = (g->GCdebt + nsize) - realosize;
+  return newblock;
+}
+```
+
+搜来搜去，最后找到了这个
+```c
+static void *l_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
+  (void)ud; (void)osize;  /* not used */
+  if (nsize == 0) {
+    free(ptr);
+    return NULL;
+  }
+  else
+    return realloc(ptr, nsize);
+}
+```
+
+返回的就是`realloc`这个指针，最后都会调用到这个函数。
+
+> `realloc`函数用于修改一个原先已经分配的内存块的大小，可以使一块内存的扩大或缩小。当起始空间的地址为空，即`*ptr = NULL`,则同malloc。当*`ptr`非空：若nuw_size < size,即缩小`*ptr`所指向的内存空间，该内存块尾部的部分内存被拿掉，剩余部分内存的原先内容依然保留；若nuw_size > size,即扩大`*ptr`所指向的内存空间，如果原先的内存尾部有足够的扩大空间，则直接在原先的内存块尾部新增内存，如果原先的内存尾部空间不足，或原先的内存块无法改变大小，realloc将重新分配另一块nuw_size大小的内存，并把原先那块内存的内容复制到新的内存块上。因此，使用realloc后就应该改用realloc返回的新指针。
+
+
 
 ------------------
 

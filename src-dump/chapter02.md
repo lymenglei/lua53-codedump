@@ -136,6 +136,7 @@ TString *luaS_createlngstrobj (lua_State *L, size_t l) {
 ```
 这里hash种子直接用的seed字段，设置u.lnglen 为字符串长度
 
+注意，hash 长字符串和短字符串的哈希方法不同
 
 
 #### 构造一个短字符串
@@ -236,6 +237,7 @@ TString *strcache[53][2];
 
 -------------------
 #### resize strt数组
+
 到这里，lua 字符串相关基本上都已经顺利完成了。（还差删除字符串）
 
 我们知道，lua 中的字符串全部保存在global_State的strt字段，另外strcache字段里，保存了一份53*2个字符串的缓存，下面就分析下strt字段，是如何进行resize的。
@@ -280,17 +282,48 @@ void luaS_resize (lua_State *L, int newsize) {
 ```
 我们先全局搜索下`luaS_resize`函数在哪里调用的，一共有3处调用
 - gc的时候，如果当前使用量小于总容量的1/4，那么就把容量缩小为原来的一半
-- 初始化，初始容量为128
+- 初始化，初始容量为128（MINSTRTABSIZE）
 - 插入新的短字符串，会检查当前nuse字段是否不小于size字段，并且不大于MAX_INT/2，则容量翻倍
 
 （思考，为什么在插入长字符串的时候没有检查扩容？）
 答：长字符串是链接到allgc上的，而短字符串是放到hash部分的。
 
+```c
+for (i = 0; i < tb->size; i++) {  /* rehash */
+    TString *p = tb->hash[i];
+    tb->hash[i] = NULL;
+    while (p) {  /* for each node in the list */
+      TString *hnext = p->u.hnext;  /* save next */
+      unsigned int h = lmod(p->hash, newsize);  /* new position */
+      p->u.hnext = tb->hash[h];  /* chain it */
+      tb->hash[h] = p;
+      p = hnext;
+    }
+}
+```
+中间这部分rehash函数很有趣，巧妙的安排在了扩容之后，或者是在做缩小容量之前。
+这里稍加思考下，这样循环遍历一遍，从0 ~ tb->size，当前的hash[i]这个链表的内容，在重新hash下，可能会插在hash[i+n]的位置上，也就是hash[i]的后面，同时i+n < tb->size。
+也就是这里面的内容可能还要在遍历一次，因为是链接到链表上了。
+这里并不会造成死循环，或者其他问题，只可能会多遍历一遍或者 tb->size - 1次（最坏情况下）
+
+申请内存空间，请参考realloc。
+
+最后，修改 tb->size 为新的大小。
 
 #### 字符串拼接
 
+好像是 luaV_concat 这个函数
+
 
 #### 删除字符串
+
+```lua
+local str = "hello"
+str = nil
+-- 这个过程会怎么设置状态？
+```
+
+
 
 -----------------
 
@@ -299,3 +332,6 @@ https://www.cnblogs.com/heartchord/p/4561308.html
 
 https://manistein.github.io/blog/post/program/build-a-lua-interpreter/%E6%9E%84%E5%BB%BAlua%E8%A7%A3%E9%87%8A%E5%99%A8part4/
 
+http://lua-users.org/lists/lua-l/2012-01/msg00497.html
+
+https://blog.csdn.net/u013517637/article/details/79002243 
