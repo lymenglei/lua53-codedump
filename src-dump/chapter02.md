@@ -1,5 +1,7 @@
 # Chapter02 
 
+https://github.com/lymenglei/lua53-codedump
+
 ## string
 
 这里介绍下字符串在lua中是如何存储的
@@ -44,7 +46,7 @@ typedef union UTString {
 
 ![lua string](./pic/c02_01.png)
 
-lua 字符串在内存中的表示如上图
+lua 字符串在内存中的表示如上图（[图片来自博客](https://www.cnblogs.com/heartchord/p/4561308.html)）
 
 -----------------------
 
@@ -310,6 +312,9 @@ for (i = 0; i < tb->size; i++) {  /* rehash */
 
 最后，修改 tb->size 为新的大小。
 
+#### 字符串查找
+TODO
+
 #### 字符串拼接
 
 好像是 luaV_concat 这个函数
@@ -322,7 +327,7 @@ local str = "hello"
 str = nil
 -- 这个过程会怎么设置状态？
 ```
-
+luaS_remove
 
 
 -----------------
