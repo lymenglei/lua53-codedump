@@ -1,5 +1,6 @@
 # Charpter01
 
+如果文章有遗漏或者不准确的地方，欢迎指出
 联系：ly-menglei@163.com
 https://github.com/lymenglei/lua53-codedump
 
@@ -125,7 +126,7 @@ void *luaM_realloc_ (lua_State *L, void *block, size_t osize, size_t nsize) {
 }
 ```
 
-搜来搜去，最后找到了这个
+搜来搜去，最后找到了这个。这个函数是lua提供的默认内存管理函数。
 ```c
 static void *l_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
   (void)ud; (void)osize;  /* not used */
@@ -138,7 +139,23 @@ static void *l_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
 }
 ```
 
+下面这段摘取自[博客](https://www.cnblogs.com/heartchord/p/4527494.html)
+```txt
+ud　 ：Lua默认内存管理器并未使用该参数。不过在用户自定义内存管理器中，可以让内存管理在不同的堆上进行。
+
+ptr　：非NULL表示指向一个已分配的内存块指针，NULL表示将分配一块nsize大小的新内存块。
+
+osize：原始内存块大小，默认内存管理器并未使用该参数。Lua的设计强制在调用内存管理器函数时候需要给出原始内存块的大小信息，如果用户需要自定义一个高效的内存管理器，那么这个参数信息将十分重要。这是因为大多数的内存管理算法都需要为所管理的内存块加上一个cookie，里面存储了内存块尺寸的信息，以便在释放内存的时候能够获取到尺寸信息(譬如多级内存池回收内存操作)。而Lua内存管理器刻意在调用内存管理器时提供了这个信息，这样就不必额外存储这些cookie信息，这样在大量使用小内存块的环境中将可以节省不少的内存。另外在ptr传入NULL时，osize表示Lua对象类型（LUA_TNIL、LUA_TBOOLEAN、LUA_TTHREAD等等），这样内存管理器就可以知道当前在分配的对象的类型，从而可以针对它做一些统计或优化的工作。
+
+nsize：新的内存块大小，特别地，在nsize为0时需要提供内存释放的功能。
+```
+
+
 返回的就是`realloc`这个指针，最后都会调用到这个函数。
+
+```c
+void *realloc (void *ptr, size_t new_size );
+```
 
 > `realloc`函数用于修改一个原先已经分配的内存块的大小，可以使一块内存的扩大或缩小。当起始空间的地址为空，即`*ptr = NULL`,则同malloc。当*`ptr`非空：若nuw_size < size,即缩小`*ptr`所指向的内存空间，该内存块尾部的部分内存被拿掉，剩余部分内存的原先内容依然保留；若nuw_size > size,即扩大`*ptr`所指向的内存空间，如果原先的内存尾部有足够的扩大空间，则直接在原先的内存块尾部新增内存，如果原先的内存尾部空间不足，或原先的内存块无法改变大小，realloc将重新分配另一块nuw_size大小的内存，并把原先那块内存的内容复制到新的内存块上。因此，使用realloc后就应该改用realloc返回的新指针。
 
@@ -148,3 +165,9 @@ static void *l_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
 
 - lua中的gc管理，是采用了改进的`三色标记法`，具体三色标记法是如何设计，和如何gc的，请自行百度搜索，有很多动图讲解的很清楚，所以后面代码中会看到很多的白灰黑三色的一些变量以及宏定义。
 
+
+
+---------------------
+参考文章：
+
+https://www.cnblogs.com/heartchord/p/4527494.html  Lua内存管理器规则

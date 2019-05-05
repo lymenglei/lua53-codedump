@@ -249,8 +249,226 @@ static void rehash (lua_State *L, Table *t, const TValue *ek) {
   luaH_resize(L, t, asize, totaluse - na);
 }
 ```
+rehash 函数里做了一个统计工作，将统计好的数据存储在nums数组里。
+
+> nums[i] = number of keys 'k' where 2^(i - 1) < k <= 2^i
+
+nums[i] 保存了key值在 2^(i-1) 到 2^i 之间（左开右闭）区间内，key值的数量。
+```
+nums[1]  (1, 2]
+nums[2]  (2, 4]
+nums[3]  (4, 8]
+nums[4]  (8, 16]
+...
+nums[i]  (2^(i-1), 2^i]
+```
 
 
+在统计完之后，调用`computesizes`来计算数组部分的大小。
+
+```c
+static unsigned int computesizes (unsigned int nums[], unsigned int *pna) {
+  int i;
+  unsigned int twotoi;  /* 2^i (candidate for optimal size) */
+  unsigned int a = 0;  /* number of elements smaller than 2^i */
+  unsigned int na = 0;  /* number of elements to go to array part */
+  unsigned int optimal = 0;  /* optimal size for array part */
+  /* loop while keys can fill more than half of total size */
+  for (i = 0, twotoi = 1; *pna > twotoi / 2; i++, twotoi *= 2) {
+    if (nums[i] > 0) {
+      a += nums[i];
+      if (a > twotoi/2) {  /* more than half elements present? */
+        optimal = twotoi;  /* optimal size (till now) */
+        na = a;  /* all elements up to 'optimal' will go to array part */
+      }
+    }
+  }
+  lua_assert((optimal == 0 || optimal / 2 < na) && na <= optimal);
+  *pna = na;
+  return optimal;
+}
+```
+
+遍历这个nums数组，获得其范围区间内所包含的整数数量大于50%的最大索引，作为重新哈希之后的数组大小，超过这个范围的正整数，就分配到哈希部分了
+
+> 如果数值key的元素个数大于对应个数幂大小的一半，则生成对应幂长度的数组链表。
+
+举个例子：
+```lua
+local tbl = {}
+tbl[2] = 0
+tbl[3] = 0
+tbl[4] = 0
+tbl[5] = 0
+```
+查找过程如下表格（*pna = 4）
+
+|  i |  区间 | a的值 | 条件(a > twotoi/2)  |  optimal数组长度 | key |
+|----|-------| ------- | ------| --------|--------|
+ 0  |  (0, 1] | 0  | 0 > 1/2 不成立 | 0 |
+ 1  |  (1, 2] | 1  | 1 > 2/2 不成立 | 0 | 2
+ 2  |  (2, 4] | 3  | 3 > 4/2 成立   | 4 | 2,3,4
+
+ 当i = 3时，不满足 4 > 8 / 2，跳出循环，此时optimal值为4，即数组部分的大小为4
+
+其中 key为2,3,4的value存放在数组部分，key值为5的存放在hash部分。
+此时若加入一行 tbl[1] = 0;放在第二行，那么数组的部分大小为8，1~5全部存放在数组中。
+
+
+
+`luaH_resize` 函数是根据之前计算的结果，来对数组部分或者hash部分，进行扩容或者收缩
+
+```c
+void luaH_resize (lua_State *L, Table *t, unsigned int nasize,
+                                          unsigned int nhsize) {
+  unsigned int i;
+  int j;
+  unsigned int oldasize = t->sizearray;
+  int oldhsize = allocsizenode(t);
+  Node *nold = t->node;  /* save old hash ... */
+  if (nasize > oldasize)  /* array part must grow? */
+    setarrayvector(L, t, nasize);
+  /* create new hash part with appropriate size */
+  setnodevector(L, t, nhsize);
+  if (nasize < oldasize) {  /* array part must shrink? */
+    t->sizearray = nasize;
+    /* re-insert elements from vanishing slice */
+    for (i=nasize; i<oldasize; i++) {
+      if (!ttisnil(&t->array[i]))
+        luaH_setint(L, t, i + 1, &t->array[i]);
+    }
+    /* shrink array */
+    luaM_reallocvector(L, t->array, oldasize, nasize, TValue);
+  }
+  /* re-insert elements from hash part */
+  for (j = oldhsize - 1; j >= 0; j--) {
+    Node *old = nold + j;
+    if (!ttisnil(gval(old))) {
+      /* doesn't need barrier/invalidate cache, as entry was
+         already present in the table */
+      setobjt2t(L, luaH_set(L, t, gkey(old)), gval(old));
+    }
+  }
+  if (oldhsize > 0)  /* not the dummy node? */
+    luaM_freearray(L, nold, cast(size_t, oldhsize)); /* free old hash */
+}
+```
+
+其中`allocsizenode`返回以2为底的散列表大小的对数值。
+`setarrayvector`函数 对表的数组部分进行大小调整，在chapter01中，介绍了申请内存空间的函数是realloc，这里扩容的话，对超出原有容量的数组部分，初始化其tt_字段为LUA_TNIL，标记为空。
+
+如果数组部分的比原来小，那么就要收缩数组部分的大小；将 nasize 到 oldasize 之间的非空元素重新插入到数组部分。这里数组收缩部分代码，调用了一个叫`luaH_setint`的函数，下面分析下这个函数：
+
+```c
+void luaH_setint (lua_State *L, Table *t, lua_Integer key, TValue *value) {
+  const TValue *p = luaH_getint(t, key);
+  TValue *cell;
+  if (p != luaO_nilobject)
+    cell = cast(TValue *, p);
+  else {
+    TValue k;
+    setivalue(&k, key);
+    cell = luaH_newkey(L, t, &k);
+  }
+  setobj2t(L, cell, value);
+}
+```
+
+```c
+/*
+** search function for integers
+*/
+const TValue *luaH_getint (Table *t, lua_Integer key) {
+  /* (1 <= key && key <= t->sizearray) */
+  if (l_castS2U(key) - 1 < t->sizearray)
+    return &t->array[key - 1];
+  else {
+    Node *n = hashint(t, key);
+    for (;;) {  /* check whether 'key' is somewhere in the chain */
+      if (ttisinteger(gkey(n)) && ivalue(gkey(n)) == key)
+        return gval(n);  /* that's it */
+      else {
+        int nx = gnext(n);
+        if (nx == 0) break;
+        n += nx;
+      }
+    }
+    return luaO_nilobject;
+  }
+}
+```
+
+`luaH_getint`这个函数可以看出来，在查找一个key值为integer类型的value时，先会比较这个integer和数组大小，如果是小于数组大小，那么就去数组中查找，否则会在hash部分查找。
+通过这个查找过程，我们也能理解部分关于key为整型时，table中数据的存储方法。正好与前文说的`computesizes`函数相对应。
+
+其中luaH_getint查找key值为integer类型对应的value值。
+`luaH_setint`这个函数将需要收缩的数组部分，重新插入收缩后的数组中去。
+在这之后，收缩数组部分大小。
+
+
+
+> 这里逻辑顺序比较乱，重新捋一次应该就清晰一点，总是插播
+
+
+`setnodevector`在table初始化的时候提过，那个时候的size为0，所以只是简单的初始化即可。
+数组部分和hash部分虽然都是数组，但是申请内存空间的宏定义却是有稍许的不同。
+
+其中数组部分申请内存的宏如下：
+```c
+// 数组部分申请内存的宏
+luaM_reallocvector(L, t->array, t->sizearray, size, TValue);
+
+//...
+
+#define luaM_reallocvector(L, v, oldn, n, t) \
+   ((v)=cast(t *, luaM_reallocv(L, v, oldn, n, sizeof(t))))
+```
+
+hash部分的申请内存空间的宏：
+```c
+t->node = luaM_newvector(L, size, Node);
+
+//...
+
+#define luaM_newvector(L, n, t) \
+		cast(t *, luaM_reallocv(L, NULL, 0, n, sizeof(t)))
+```
+
+最后都会调用到`luaM_reallocv`这个宏：
+```c
+#define luaM_reallocv(L, b, on, n, e) \
+  (((sizeof(n) >= sizeof(size_t) && cast(size_t, (n)) + 1 > MAX_SIZET/(e)) \
+      ? luaM_toobig(L) : cast_void(0)) , \
+   luaM_realloc_(L, (b), (on)*(e), (n)*(e)))
+```
+
+`luaM_realloc_`函数的代码在chapter01最后有贴过。
+从调用到luaM_realloc_这个函数，传递的参数来看，区别就是，第二个参数是否为NULL，和第三个参数是否为0。
+
+根据`l_alloc `函数的定义，第二个参数第三个参数都没用到，所以在使用默认的l_alloc这个函数作为内存管理函数的话，二者是没有区别的。
+
+
+> 回头接着说luaH_resize。
+
+由于在申请新的hash部分数组之前，已经把原来的hash部分数组的指针保存了起来，所以新申请的hash数组直接遍历一遍，初始为空类型。
+并且保存下新hash部分数组大小，lastfree指向数组最后一个指针。上述是setnodevector这个函数干的事情。
+
+数组部分收缩在上文已经说过了。之后就是重新插入hash部分的元素（hash部分容量变了）
+
+最后，释放掉旧的hash部分数组。
+
+
+- 总结：
+
+通过resize函数可以看出来，table中的数组部分和hash部分是如何动态变化的。其中数组部分和hash部分可能会收缩，也可能会增大其数组的容量。
+只有hash部分满的时候，才会触发rehash
+key为整型的值，部分存在数组里，部分存在hash里，50%的最大索引
+
+
+------------------------
+
+#### 那些key存在数组部分那些存在hash部分？
+根据 50%的最大索引 这一规则，决定一个无符号整型值存放在数组部分还是hash部分，其它类型的key存放在hash部分。
 
 
 
@@ -258,3 +476,5 @@ static void rehash (lua_State *L, Table *t, const TValue *ek) {
 
 ## 参考文章：
 https://blog.csdn.net/fwb330198372/article/details/88579361
+
+http://geekluo.com/contents/2014/04/11/3-lua-table-structure.html
