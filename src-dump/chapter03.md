@@ -21,9 +21,9 @@ typedef struct Node {
 ```
 
 对于TKey，任何时候只有两种类型，要么是整数，要么不是整数(not nil)
-next字段在之前版本是指针，5.3版本换成了便宜，指向下一个偏移的节点
+next字段在之前版本是指针，5.3版本换成了偏移，指向下一个偏移的节点
 
-Node节点是table的节点值。
+Node是table的节点值。
 
 然后是真正的`table`类型的定义：
 
@@ -42,7 +42,7 @@ typedef struct Table {
 ```
 
 对于Table，先挑重点的说。
-我们知道table内部实际上分为数组部分和hash部分，其中数组部分存在array数组里，hash部分存放在node数组里；数组部分的容量为sizearray，hash部分容量为2的lsizenode次幂（hash部分容量总是2的N次幂，这个规则后面还会提到），lastfree是一个指针，初始指向一个dummyNode，之后会随着插入新节点产生冲突时，由node数组的尾部向前移动。
+我们知道table内部实际上分为数组部分和hash部分，其中数组部分存在array数组里，hash部分存放在node数组里；数组部分的容量为sizearray，hash部分容量为2的lsizenode次幂（hash部分容量总是2的N次幂，这个规则后面还会提到）。lastfree是一个指针，初始指向一个dummyNode，之后会随着插入新节点产生冲突时，由node数组的尾部向前移动。
 
 根据lua代码中使用table的情况，会从构造一个table，索引，插入，删除等来分析table内部是如何存储值的。主要在ltable.c中
 
@@ -312,7 +312,7 @@ tbl[5] = 0
  当i = 3时，不满足 4 > 8 / 2，跳出循环，此时optimal值为4，即数组部分的大小为4
 
 其中 key为2,3,4的value存放在数组部分，key值为5的存放在hash部分。
-此时若加入一行 tbl[1] = 0;放在第二行，那么数组的部分大小为8，1~5全部存放在数组中。
+此时若加入一行 tbl[1] = 0;放在第二行，那么数组的部分大小为8，1~5全部存放在数组中。并且空余出3个位置。
 
 
 
@@ -461,7 +461,9 @@ t->node = luaM_newvector(L, size, Node);
 - 总结：
 
 通过resize函数可以看出来，table中的数组部分和hash部分是如何动态变化的。其中数组部分和hash部分可能会收缩，也可能会增大其数组的容量。
+
 只有hash部分满的时候，才会触发rehash
+
 key为整型的值，部分存在数组里，部分存在hash里，50%的最大索引
 
 
@@ -469,6 +471,134 @@ key为整型的值，部分存在数组里，部分存在hash里，50%的最大�
 
 #### 那些key存在数组部分那些存在hash部分？
 根据 50%的最大索引 这一规则，决定一个无符号整型值存放在数组部分还是hash部分，其它类型的key存放在hash部分。
+
+--------------------
+
+#### 查找key
+
+查找一个key的主方法为`luaH_get`
+```c
+const TValue *luaH_get (Table *t, const TValue *key) {
+  switch (ttype(key)) {
+    case LUA_TSHRSTR: return luaH_getshortstr(t, tsvalue(key));
+    case LUA_TNUMINT: return luaH_getint(t, ivalue(key));
+    case LUA_TNIL: return luaO_nilobject;
+    case LUA_TNUMFLT: {
+      lua_Integer k;
+      if (luaV_tointeger(key, &k, 0)) /* index is int? */
+        return luaH_getint(t, k);  /* use specialized version */
+      /* else... */
+    }  /* FALLTHROUGH */
+    default:
+      return getgeneric(t, key);
+  }
+}
+```
+根据key的类型，去调用不同的查找方法来查找，对于key值可以转换为int类型的，那么就优先到数组里查找，大于数组大小了则去hash部分查找，如果没有找到，这里返回了一个`luaO_nilobject`。
+
+其中,`luaO_nilobject`定义是一个TValue类型常量对象luaO_nilobject_的地址。
+
+```c
+/*
+** (address of) a fixed nil value
+*/
+#define luaO_nilobject		(&luaO_nilobject_)
+
+// LUAI_DDEC extern
+LUAI_DDEC const TValue luaO_nilobject_;
+```
+可以看到lua内部，是用这样一个常量对象的地址，来表示唯一一个nil值。
+
+TODO
+lua里面nil值应该有多层，不同层表示的含义不同好像？？？？
+
+--------------------------
+
+#### `#`求table大小
+
+```c
+/*
+** Try to find a boundary in table 't'. A 'boundary' is an integer index
+** such that t[i] is non-nil and t[i+1] is nil (and 0 if t[1] is nil).
+*/
+int luaH_getn (Table *t) {
+  unsigned int j = t->sizearray;
+  if (j > 0 && ttisnil(&t->array[j - 1])) {
+    /* there is a boundary in the array part: (binary) search for it */
+    unsigned int i = 0;
+    while (j - i > 1) {
+      unsigned int m = (i+j)/2;
+      if (ttisnil(&t->array[m - 1])) j = m;
+      else i = m;
+    }
+    return i;
+  }
+  /* else must find a boundary in hash part */
+  else if (isdummy(t))  /* hash part is empty? */
+    return j;  /* that is easy... */
+  else return unbound_search(t, j);
+}
+```
+
+先看看lua的代码运行的结果
+
+```lua
+local test1 = { 1, 3 , 5 , 2 , 4 }
+print(#test1)-- 5
+
+local test1 = {[1] = 1 , [2] = 2 , [3] = 3 , [4] = 4 ,[5] = 5}
+print(#test1)-- 5
+
+local test1 = {[1] = 1 ,[2] = 1, [3] = 1 , [4] = 1 , [6] = 1 }
+print(#test1) -- 6 中间[5]没有，但是返回的是6
+
+local test1 = {[4] = 4 , [6] = 6 ,[2] = 2}
+print(#test1) -- 0
+
+local test1 = {[1] = 1 , [2] = 2 ,[4] = 4 ,[6] = 6}
+print(#test1) -- 6
+
+local test1 = {[1] = 1, [2] = 2 ,[5] = 5 ,[6] = 6}
+print(#test1) -- 2
+
+local test1 = { ['a'] = 1, ['b'] = 2 ,['c'] = 3}
+print(#test1) -- 0
+```
+根据#运算求得的值，与上面函数源码，不难发现其求值的方法。
+当数组部分不连续的时候，用#来求数组的大小是不准确的。
+
+
+-----------------
+
+#### 遍历
+
+```c
+int luaH_next (lua_State *L, Table *t, StkId key) {
+  unsigned int i = findindex(L, t, key);  /* find original element */
+  for (; i < t->sizearray; i++) {  /* try first array part */
+    if (!ttisnil(&t->array[i])) {  /* a non-nil value? */
+      setivalue(key, i + 1);
+      setobj2s(L, key+1, &t->array[i]);
+      return 1;
+    }
+  }
+  for (i -= t->sizearray; cast_int(i) < sizenode(t); i++) {  /* hash part */
+    if (!ttisnil(gval(gnode(t, i)))) {  /* a non-nil value? */
+      setobj2s(L, key, gkey(gnode(t, i)));
+      setobj2s(L, key+1, gval(gnode(t, i)));
+      return 1;
+    }
+  }
+  return 0;  /* no more elements */
+}
+```
+
+
+-----------------
+
+#### 删除key
+
+
 
 
 
@@ -478,3 +608,6 @@ key为整型的值，部分存在数组里，部分存在hash里，50%的最大�
 https://blog.csdn.net/fwb330198372/article/details/88579361
 
 http://geekluo.com/contents/2014/04/11/3-lua-table-structure.html
+
+lua中关于取长度问题
+https://www.2cto.com/kf/201501/370498.html

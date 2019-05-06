@@ -141,6 +141,40 @@ TString *luaS_createlngstrobj (lua_State *L, size_t l) {
 注意，hash 长字符串和短字符串的哈希方法不同
 
 
+#### 字符串的hash算法
+
+```c
+unsigned int luaS_hash (const char *str, size_t l, unsigned int seed) {
+  unsigned int h = seed ^ cast(unsigned int, l);
+  size_t step = (l >> LUAI_HASHLIMIT) + 1;
+  for (; l >= step; l -= step)
+    h ^= ((h<<5) + (h>>2) + cast_byte(str[l - 1]));
+  return h;
+}
+```
+对于比较长的字符串（32字节以上），为了加快哈希过程，计算字符串哈希值是跳跃进行的。跳跃的步长（step）是由LUAI_HASHLIMIT宏控制的。
+
+```c
+/*
+** Lua will use at most ~(2^LUAI_HASHLIMIT) bytes from a string to
+** compute its hash
+*/
+#if !defined(LUAI_HASHLIMIT)
+#define LUAI_HASHLIMIT		5
+#endif
+```
+
+```
+Hash DoS攻击：攻击者构造出上千万个拥有相同哈希值的不同字符串，用来数十倍地降低Lua从外部压入字符串到内部字符串表的效率。当Lua用于大量依赖字符串处理的服务（例如HTTP）的处理时，输入的字符串将不可控制， 很容易被人恶意利用 。
+
+为了防止Hash DoS攻击的发生，Lua一方面将长字符串独立出来，大文本的输入字符串将不再通过哈希内部化进入全局字符串表中；另一方面使用一个随机种子用于字符串哈希值的计算，使得攻击者无法轻易构造出拥有相同哈希值的不同字符串。
+
+随机种子是在创建虚拟机的global_State（全局状态机）时构造并存储在global_State中的。随机种子也是使用luaS_hash函数生成，它利用内存地址随机性以及一个用户可配置的一个随机量（luai_makeseed宏）同时来决定。
+
+用户可以在luaconf.h中配置luai_makeseed来定义自己的随机方法，Lua默认是利用time函数获取系统当前时间来构造随机种子。luai_makeseed的默认行为有可能给调试带来一些困扰： 由于字符串hash值的不同，程序每次运行过程中的内部布局将有一些细微变化，不过字符串池使用的是开散列算法， 这个影响将非常小。如果用户希望让嵌入Lua的程序每次运行都严格一致，那么可以自定义luai_makeseed函数来实现。
+```
+
+
 #### 构造一个短字符串
 直接看代码吧
 
@@ -311,6 +345,35 @@ for (i = 0; i < tb->size; i++) {  /* rehash */
 申请内存空间，请参考realloc。
 
 最后，修改 tb->size 为新的大小。
+
+#### 字符串的比较
+先去分长短字符串，然后在根据不同的策略去比较
+
+在函数`luaV_equalobj`中
+```c
+case LUA_TSHRSTR: return eqshrstr(tsvalue(t1), tsvalue(t2));
+case LUA_TLNGSTR: return luaS_eqlngstr(tsvalue(t1), tsvalue(t2));
+```
+由于短字符串已经内化的一种数据，所以直接比较其地址即可
+```c
+/*
+** equality for short strings, which are always internalized
+*/
+#define eqshrstr(a,b)	check_exp((a)->tt == LUA_TSHRSTR, (a) == (b))
+```
+
+对于长字符串，先比较是否是同一个实例，在比较字符串长度，在逐字节比较
+```c
+int luaS_eqlngstr (TString *a, TString *b) {
+  size_t len = a->u.lnglen;
+  lua_assert(a->tt == LUA_TLNGSTR && b->tt == LUA_TLNGSTR);
+  return (a == b) ||  /* same instance or... */
+    ((len == b->u.lnglen) &&  /* equal length and ... */
+     (memcmp(getstr(a), getstr(b), len) == 0));  /* equal contents */
+}
+```
+
+
 
 #### 字符串查找
 TODO
