@@ -2,6 +2,9 @@
 
 https://github.com/lymenglei/lua53-codedump
 
+[toc]
+
+
 ## string
 
 这里介绍下字符串在lua中是如何存储的
@@ -375,15 +378,15 @@ int luaS_eqlngstr (TString *a, TString *b) {
 
 
 
-#### 字符串查找
+#### 字符串查找 TODO
 TODO
 
-#### 字符串拼接
+#### 字符串拼接 TODO
 
 好像是 luaV_concat 这个函数
 
 
-#### 删除字符串
+#### 删除字符串 TODO
 
 ```lua
 local str = "hello"
