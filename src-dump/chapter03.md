@@ -519,6 +519,9 @@ lua里面nil值应该有多层，不同层表示的含义不同好像？？？�
 
 #### #求table大小
 
+`luaV_objlen`函数是主入口，Main operation 'ra' = #rb'.
+当rb的类型为table时，会走luaH_getn函数
+
 ```c
 /*
 ** Try to find a boundary in table 't'. A 'boundary' is an integer index
@@ -573,7 +576,7 @@ print(#test1) -- 0
 
 -----------------
 
-#### 遍历  TODO
+#### 遍历，pairs ipairs  TODO
 
 ```c
 int luaH_next (lua_State *L, Table *t, StkId key) {
@@ -595,6 +598,91 @@ int luaH_next (lua_State *L, Table *t, StkId key) {
   return 0;  /* no more elements */
 }
 ```
+下面是官网对ipairs 和 pairs的说明文档
+
+```
+ipairs (t)
+
+Returns three values (an iterator function, the table t, and 0) so that the construction
+
+     for i,v in ipairs(t) do body end
+
+will iterate over the key–value pairs (1,t[1]), (2,t[2]), ..., up to the first nil value. 
+
+------------------
+
+pairs (t)
+
+If t has a metamethod __pairs, calls it with t as argument and returns the first three results from the call.
+
+Otherwise, returns three values: the next function, the table t, and nil, so that the construction
+
+     for k,v in pairs(t) do body end
+
+will iterate over all key–value pairs of table t.
+
+See function next for the caveats of modifying the table during its traversal. 
+```
+可以看到
+ipairs返回三个值：迭代方法、table、0
+pairs也返回三个值：next方法，table，nil
+
+```lua
+for k,v in pairs(t) do
+    print(k,v)
+end
+```
+展开：
+```lua
+for k, v in iter, tab, nil do
+    body
+end
+```
+《Programming in Lua》给出的代码是：
+```lua
+do 
+    local _f,_s,_var = iter,tab,var 
+    while true do 
+        local _var,value = _f(_s, _var) -- 通过上一个key找下一个key 
+        if not _var then break end 
+        body 
+    end 
+end
+```
+```lua
+LUA_API int lua_next (lua_State *L, int idx) {
+  StkId t;
+  int more;
+  lua_lock(L);
+  t = index2addr(L, idx);
+  api_check(L, ttistable(t), "table expected");
+  more = luaH_next(L, hvalue(t), L->top - 1);
+  if (more) {
+    api_incr_top(L);
+  }
+  else  /* no more elements */
+    L->top -= 1;  /* remove key */
+  lua_unlock(L);
+  return more;
+}
+```
+其中上述代码中`_f`即为`lua_next`, 函数的内部会调用`luaH_next`
+
+luaH_next 每次 传入一个table，一个key值，在迭代方法里，每次通过上一个key值，来找下一个key，直到找到的key值为空时，跳出循环。（初始的key是啥？？）
+
+
+
+
+-----------------
+
+#### 插入一个key TODO
+
+`lua_settable` 这个函数是从C调过来的。会调用到`luaV_settable`这个宏。
+它会优先调用`luaV_fastset`，如果luaV_fastset返回false，那么会调用`luaV_finishset`。
+
+插入一个key，先会去这个table里查这个key是否存在，如果存在，就重新设置新的值。
+否则会先去找这个table里面有没有元表，没有元表并且上步查找key对应的slot是一个luaO_nilobject，那么就设置一个新的值。如果有元表，那么就去执行元表的方法。
+
 
 
 -----------------
@@ -602,7 +690,85 @@ int luaH_next (lua_State *L, Table *t, StkId key) {
 #### 删除key TODO
 
 
+---------------------------------------
 
+## 更多table的用法库
+
+前面介绍的一些源码，大多在文件ltable.c中，下面就介绍一些table使用的其它库函数。
+`ltablib.c`
+```c
+static const luaL_Reg tab_funcs[] = {
+  {"concat", tconcat},
+#if defined(LUA_COMPAT_MAXN)
+  {"maxn", maxn},
+#endif
+  {"insert", tinsert},
+  {"pack", pack},
+  {"unpack", unpack},
+  {"remove", tremove},
+  {"move", tmove},
+  {"sort", sort},
+  {NULL, NULL}
+};
+
+LUAMOD_API int luaopen_table (lua_State *L) {
+  luaL_newlib(L, tab_funcs);
+#if defined(LUA_COMPAT_UNPACK)
+  /* _G.unpack = table.unpack */
+  lua_getfield(L, -1, "unpack");
+  lua_setglobal(L, "unpack");
+#endif
+  return 1;
+}
+```
+看到上面的代码就有种很熟悉的感觉，这样写与 将C/C++函数的接口暴露给lua去调用非常相似：
+下面的代码来自：[github](https://github.com/lymenglei/xlnt/blob/master/menglei/test.cpp)
+```c++
+lua_State* L = luaL_newstate(); 
+luaL_openlibs(L);
+/* 注册函数 */
+lua_register(L, "dosomething", readImpl);
+lua_register(L, "ReadExcel", readExcel);
+lua_register(L, "func_return_table", func_return_table);
+```
+可以猜测，上述代码是实现`table.remove`之类的功能的。实际的实现方式以注册函数的方式来实现这些方法的。
+当然自己也可以修改这些函数，以实现自己的需求。定制lua源码。
+
+下面简单介绍下lua的栈。更多请参考[博文](https://blog.csdn.net/zhuzhuyule/article/details/41086745)
+
+lua的虚拟机是一个栈，在与C++交互的时候，用的就是一个栈。
+栈底的元素索引到栈顶，是123456... ,而从栈顶索引到栈底，是-1,-2,-3...
+
+```txt
+    栈顶
+5    "e"    -1
+4    "d"    -2
+3    "c"    -3
+2    "b"    -4
+1    "a"    -5
+    栈底
+```
+
+table.remove(t, key) 要求key必须为number类型
+```c
+static int tremove (lua_State *L) {
+  lua_Integer size = aux_getn(L, 1, TAB_RW);
+  lua_Integer pos = luaL_optinteger(L, 2, size);
+  if (pos != size)  /* validate 'pos' if given */
+    luaL_argcheck(L, 1 <= pos && pos <= size + 1, 1, "position out of bounds");
+  lua_geti(L, 1, pos);  /* result = t[pos] */
+  for ( ; pos < size; pos++) {
+    lua_geti(L, 1, pos + 1);
+    lua_seti(L, 1, pos);  /* t[pos] = t[pos + 1] */
+  }
+  lua_pushnil(L);
+  lua_seti(L, 1, pos);  /* t[pos] = nil */
+  return 1;
+}
+```
+上述函数即为table.remove的实现方法，下面先分析下L这个栈上都有那些数据。
+栈索引1处为table，2处为table.remove的第二个参数，是个integer类型，函数的前两行是获取table的长度和第二个参数的值。
+取得`t[pos]`的值，放到栈顶，在循环一次，将`t[pos] = t[pos + 1]`，最后再将`t[pos] = nil`，完成删除
 
 
 --------------------
