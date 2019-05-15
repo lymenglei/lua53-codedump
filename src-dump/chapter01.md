@@ -54,7 +54,7 @@ Userdata represent C values in Lua. A light userdata represents a pointer . It 
 ```
 上面这句话是 lua 官网对二者的描述，从这里能看出来 light userdata实际上就是一个C指针，它的生命周期有C/C++控制，而userdata可以理解为，C/C++对象，创建是在lua里创建，内存的释放也是lua虚拟机来进行管理的。
 
-（TODO）接着上面的`Value`联合体说，b字段用来标示bool值，f字段是跟lua51版本比，新增加出来的一个字段
+接着上面的`Value`联合体说，b字段用来标示bool值，f字段是跟lua51版本比，新增加出来的一个字段
 
 i字段，用来标示整型，n字段表示浮点数。（lua51中，只有一个lua_Number字段，53版本进行了一个细化拆分）
 
@@ -81,6 +81,10 @@ typedef struct lua_TValue
 
 
 其它类型，string table Closure(闭包) Proto 暂时先不介绍，等到后面具体到某个类型在介绍。先了解这么多就可以了，因为后面忘了还是会回来重新看这些宏定义的。
+
+#### nil值
+参考chapter03，`查找key`
+
 
 #### lua_State
 
@@ -157,13 +161,30 @@ nsize：新的内存块大小，特别地，在nsize为0时需要提供内存释
 void *realloc (void *ptr, size_t new_size );
 ```
 
-> `realloc`函数用于修改一个原先已经分配的内存块的大小，可以使一块内存的扩大或缩小。当起始空间的地址为空，即`*ptr = NULL`,则同malloc。当*`ptr`非空：若nuw_size < size,即缩小`*ptr`所指向的内存空间，该内存块尾部的部分内存被拿掉，剩余部分内存的原先内容依然保留；若nuw_size > size,即扩大`*ptr`所指向的内存空间，如果原先的内存尾部有足够的扩大空间，则直接在原先的内存块尾部新增内存，如果原先的内存尾部空间不足，或原先的内存块无法改变大小，realloc将重新分配另一块nuw_size大小的内存，并把原先那块内存的内容复制到新的内存块上。因此，使用realloc后就应该改用realloc返回的新指针。
+> `realloc`函数用于修改一个原先已经分配的内存块的大小，可以使一块内存的扩大或缩小。当起始空间的地址为空，即`*ptr = NULL`,则同malloc。当*`ptr`非空：若nuw_size < size,即缩小`*ptr`所指向的内存空间，该内存块尾部的部分内存被拿掉，剩余部分内存的原先内容依然保留；若nuw_size > size,即扩大`*ptr`所指向的内存空间，如果原先的内存尾部有足够的扩大空间，则直接在原先的内存块尾部新增内存，如果原先的内存尾部空间不足，或原先的内存块无法改变大小，realloc将重新分配另一块new_size大小的内存，并把原先那块内存的内容复制到新的内存块上。因此，使用realloc后就应该改用realloc返回的新指针。
 
 
 
 ------------------
 
 - lua中的gc管理，是采用了改进的`三色标记法`，具体三色标记法是如何设计，和如何gc的，请自行百度搜索，有很多动图讲解的很清楚，所以后面代码中会看到很多的白灰黑三色的一些变量以及宏定义。
+
+
+------------------------
+> luac.exe -l -p xxx.lua
+
+来查看xxx.lua 编译的字节码是什么格式的
+
+```
+menglei@menglei-PC MINGW64 /d/software/lua-5.3.3_Win32_bin
+$ ./luac.exe -p -l a.lua
+
+main <a.lua:0,0> (3 instructions at 00ab21d0)
+0+ params, 2 slots, 1 upvalue, 2 locals, 1 constant, 0 functions
+        1       [2]     LOADNIL         0 0
+        2       [3]     LOADK           1 -1    ; 4
+        3       [3]     RETURN          0 1
+```
 
 
 

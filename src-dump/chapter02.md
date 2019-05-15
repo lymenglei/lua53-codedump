@@ -86,7 +86,7 @@ static TString *createstrobj (lua_State *L, size_t l, int tag, unsigned int h){
 #define sizelstring(l)  (sizeof(union UTString) + ((l) + 1) * sizeof(char))
 ```
 
-求一个UTString的大小+ （l+1）个char类型的内存空间大小
+求一个UTString的大小+ （l+1）个char类型的内存空间大小。TString对象之后的内存空间，存储了真正的字符串的内容。
 
 
 `luaC_newobj`这个函数在后面也会有很多地方用到，创建一个可以回收的对象，并且把这个对象添加到g->allgc表头
@@ -249,7 +249,7 @@ static TString *internshrstr (lua_State *L, const char *str, size_t l) {
 #### 区分长字符串和短字符串
 luaS_newlstr 方法是构造一个字符串，在这里有一些判断条件， 用来划分什么样的字符串是长字符串，什么样的字符串是短字符串。
 
-长度不大于40即为短字符串，否则为长字符串。
+长度不大于40（`#define LUAI_MAXSHORTLEN	40`）即为短字符串，否则为长字符串。
 
 #### 字符串缓存
 
@@ -391,7 +391,6 @@ TODO
 ```lua
 local str = "hello"
 str = nil
--- 这个过程会怎么设置状态？
 ```
 luaS_remove
 

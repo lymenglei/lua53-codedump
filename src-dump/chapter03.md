@@ -473,7 +473,7 @@ key为整型的值，部分存在数组里，部分存在hash里，50%的最大�
 ------------------------
 
 #### 那些key存在数组部分那些存在hash部分？
-根据 50%的最大索引 这一规则，决定一个无符号整型值存放在数组部分还是hash部分，其它类型的key存放在hash部分。
+根据 50%的最大索引 这一规则，决定一个整型值存放在数组部分还是hash部分，其它类型的key存放在hash部分。
 
 --------------------
 
@@ -508,12 +508,24 @@ const TValue *luaH_get (Table *t, const TValue *key) {
 #define luaO_nilobject		(&luaO_nilobject_)
 
 // LUAI_DDEC extern
-LUAI_DDEC const TValue luaO_nilobject_;
+LUAI_DDEF const TValue luaO_nilobject_ = {NILCONSTANT};
+
+/* macro defining a nil value */
+#define NILCONSTANT	{NULL}, LUA_TNIL
+```
+所以luaO_nilobject_展开为：
+
+```c
+luaO_nilobject_ = 
+{
+    value_ = NULL;
+    tt_ = LUA_TNIL;
+}
+
 ```
 可以看到lua内部，是用这样一个常量对象的地址，来表示唯一一个nil值。
 
-TODO
-lua里面nil值应该有多层，不同层表示的含义不同好像？？？？
+
 
 --------------------------
 
