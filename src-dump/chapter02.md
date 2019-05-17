@@ -377,13 +377,9 @@ int luaS_eqlngstr (TString *a, TString *b) {
 ```
 
 
-
-#### 字符串查找 TODO
-TODO
-
 #### 字符串拼接 TODO
 
-好像是 luaV_concat 这个函数
+luaV_concat 这个函数，拼接字符串都会生成一个新的字符串
 
 
 #### 删除字符串 TODO
@@ -392,7 +388,30 @@ TODO
 local str = "hello"
 str = nil
 ```
-luaS_remove
+luaS_remove 这个函数，是在gc阶段删除掉字符串的时候，会调用的
+
+```c
+void luaS_remove (lua_State *L, TString *ts) {
+  stringtable *tb = &G(L)->strt;
+  TString **p = &tb->hash[lmod(ts->hash, tb->size)];
+  while (*p != ts)  /* find previous element */
+    p = &(*p)->u.hnext;
+  *p = (*p)->u.hnext;  /* remove element from its list */
+  tb->nuse--;
+}
+```
+目前网上传了一份关于`lstring.c`这个文件的中文注释，其中对这个函数的注释如下：
+```c
+// 从全局变量就是global_State的strt成员里面移除特定字符串
+// 首先得到tb，指向strt数组，然后再通过tb的hash数组通过提供tb的长度和字符串的hash，来找到字符串属于哪个链表
+// 然后一直循环，直到找到等于ts的，然后就把这个字符串的地址给抹去了(不会内存泄漏？？？）
+```
+确实，但看这个函数，会造成内存泄露，原来持有这个对象的指针变成了一个悬空指针。
+但是，在`lgc.c`中freeobj这个函数的调用处可以看到，在remove之后，紧接着释放掉了该对象的内存。这也正符合一个函数只做一件事情的原则。
+```c
+luaS_remove(L, gco2ts(o));  /* remove it from hash table */
+luaM_freemem(L, o, sizelstring(gco2ts(o)->shrlen));
+```
 
 
 -----------------

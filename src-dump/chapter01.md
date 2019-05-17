@@ -20,11 +20,11 @@ https://github.com/lymenglei/lua53-codedump
 
 ## lua对象模型的基础介绍
 
-lobject.h
+
 
 #### GCObject Value TValue
 
-72行，迎来了首个比较重要的数据结构`GCObject`，另外`CommonHeader`中的tt字段，可以理解为是用来标记lua 8种数据类型，故：
+lobject.h 72行，迎来了首个比较重要的数据结构`GCObject`，另外`CommonHeader`中的tt字段，可以理解为是用来标记lua 8种数据类型，故：
 ```c
 // 展开之后
 struct GCObject {
@@ -46,7 +46,7 @@ typedef union Value {
   lua_Number n;    /* float numbers */
 } Value;
 ```
-从英文的注释也能看出来，Value类型是一个联合体，其中gc指针，把所有的GCObject串起来，这个在后面垃圾回收（gc）的时候会用到
+从注释也能看出来，Value类型是一个联合体，其中gc指针，把所有的GCObject串起来，这个在后面垃圾回收（gc）的时候会用到
 其中p字段表示的是light userdata，下面插播介绍下light userdata 和 userdata的区别：
 
 ```
@@ -94,11 +94,11 @@ typedef struct lua_TValue
 
 
 #### 通用的申请内存空间函数
-在global_State中，有个
+在global_State中，有个字段
 ```c
 lua_Alloc frealloc;  /* function to reallocate memory */
 ```
-字段，这是一个函数指针，最开始看了好久都没太看懂这里是什么意思。
+这是一个函数指针。
 在strt的resize以及table的resize函数里，都会有看到类似的代码，去申请一块内存空间。
 最终都会调用到如下部分：
 ```c
@@ -167,10 +167,11 @@ void *realloc (void *ptr, size_t new_size );
 
 ------------------
 
-- lua中的gc管理，是采用了改进的`三色标记法`，具体三色标记法是如何设计，和如何gc的，请自行百度搜索，有很多动图讲解的很清楚，所以后面代码中会看到很多的白灰黑三色的一些变量以及宏定义。
+- lua中的gc管理，是采用了改进的`三色标记法`，具体三色标记法是如何设计，和如何gc的，请参考Chapter04，有很多动图讲解的很清楚，所以后面代码中会看到很多的白灰黑三色的一些变量以及宏定义。
 
 
 ------------------------
+#### 字节码
 > luac.exe -l -p xxx.lua
 
 来查看xxx.lua 编译的字节码是什么格式的
@@ -189,6 +190,6 @@ main <a.lua:0,0> (3 instructions at 00ab21d0)
 
 
 ---------------------
-参考文章：
+## 参考文章：
 
 https://www.cnblogs.com/heartchord/p/4527494.html  Lua内存管理器规则

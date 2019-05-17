@@ -6,23 +6,122 @@ https://github.com/lymenglei/lua53-codedump
 
 
 ```txt
-nil 只有全局一个引用吗
-那些值会放到root set中?
-有无碎片，内存碎片是如何整理的？
-
+TODO list
 weak table 弱表的概念，P143
-增量gc碎片化的问题
 ```
+
+## lua的gc算法以及碎片整理
+
+- lua 5.3 使用mark-sweep（后文会介绍 三色增量标记法）
+- lua 的gc算法并不做内存整理
+
+> Cloud： 
+> lua 的 GC 算法并不做内存整理，它不会在内存中迁移数据。实际上，如果你能肯定一个 string 不会被清除，那么它的内存地址也是不变的，这样就带来的优化空间。ltm.c 中就是这样做的。
+> 评论：lua 中的内存碎片问题可以通过定制内存分配器解决。对于数据类型很少的 lua ，大多数内存块尺寸都是非常规则的。
+
+关于这个问题，可以参考 [云风的博客](https://blog.codingnow.com/2011/03/lua_gc_2.html)
+同时关于Mark-Sweep的优化方法(mark-compact等)，参考[博客](https://liujiacai.net/blog/2018/07/08/mark-sweep/)
+
+
 ## 那些值会放到allgc链表中？
 
-`luaC_newobj`根据这个函数，搜索其调用的地方，可以发现，当new一个以下类型的对象时，会被连接到链表表头：
+`luaC_newobj`根据这个函数，全局搜索其调用的地方，可以发现，当new一个以下类型的对象时，会被连接到链表表头：
 
 ```
 - string
 - table
+- userdata  UserData在lua中和string类似，可以看成是拥有独立元表，不被内部化，也不需要追加\0的字符串
 - proto 函数原型数据结构
 - CClosure  c函数闭包
 - LClosure  lua 闭包
+```
+
+```c
+// creates a new string object  lstring.c
+static TString *createstrobj (lua_State *L, size_t l, int tag, unsigned int h) {
+  TString *ts;
+  GCObject *o;
+  size_t totalsize;  /* total size of TString object */
+  totalsize = sizelstring(l);
+  o = luaC_newobj(L, tag, totalsize);
+  ts = gco2ts(o); // gc object to TString
+  ts->hash = h;
+  ts->extra = 0;
+  getstr(ts)[l] = '\0';  /* ending 0 */
+  return ts;
+}
+
+// userdata  lstring.c
+Udata *luaS_newudata (lua_State *L, size_t s) {
+  Udata *u;
+  GCObject *o;
+  if (s > MAX_SIZE - sizeof(Udata))
+    luaM_toobig(L);
+  o = luaC_newobj(L, LUA_TUSERDATA, sizeludata(s));
+  u = gco2u(o);
+  u->len = s;
+  u->metatable = NULL;
+  setuservalue(L, u, luaO_nilobject);
+  return u;
+}
+
+// 创建一个空table  ltable.c
+Table *luaH_new (lua_State *L) {
+  GCObject *o = luaC_newobj(L, LUA_TTABLE, sizeof(Table));
+  Table *t = gco2t(o);
+  t->metatable = NULL;
+  t->flags = cast_byte(~0);
+  t->array = NULL;
+  t->sizearray = 0;
+  setnodevector(L, t, 0);
+  return t;
+}
+
+
+// c函数闭包  lfunc.c
+CClosure *luaF_newCclosure (lua_State *L, int n) {
+  GCObject *o = luaC_newobj(L, LUA_TCCL, sizeCclosure(n));
+  CClosure *c = gco2ccl(o);
+  c->nupvalues = cast_byte(n);
+  return c;
+}
+
+// lua 闭包  lfunc.c
+LClosure *luaF_newLclosure (lua_State *L, int n) {
+  GCObject *o = luaC_newobj(L, LUA_TLCL, sizeLclosure(n));
+  LClosure *c = gco2lcl(o);
+  c->p = NULL;
+  c->nupvalues = cast_byte(n);
+  while (n--) c->upvals[n] = NULL;
+  return c;
+}
+
+// 函数原型数据结构  lfunc.c
+Proto *luaF_newproto (lua_State *L) {
+  GCObject *o = luaC_newobj(L, LUA_TPROTO, sizeof(Proto));
+  Proto *f = gco2p(o);
+  f->k = NULL;
+  f->sizek = 0;
+  f->p = NULL;
+  f->sizep = 0;
+  f->code = NULL;
+  f->cache = NULL;
+  f->sizecode = 0;
+  f->lineinfo = NULL;
+  f->sizelineinfo = 0;
+  f->upvalues = NULL;
+  f->sizeupvalues = 0;
+  f->numparams = 0;
+  f->is_vararg = 0;
+  f->maxstacksize = 0;
+  f->locvars = NULL;
+  f->sizelocvars = 0;
+  f->linedefined = 0;
+  f->lastlinedefined = 0;
+  f->source = NULL;
+  return f;
+}
+
 ```
 
 
@@ -95,7 +194,7 @@ lua53中，初始化阶段的入口函数为`restartcollection`, 会调用到`re
 - 对于字符串类型，由于字符串没有引用其他结构，所以略过标记为灰色，直接标记为黑色。
 - 对于udata类型，这种类型也不会引用其他类型，所以标记为黑色，对于这种类型还要标记对应的元表
 
-注意，这里没有对对象锁引用的对象进行递归调用reallymarkobject函数进行标记，比如table类型递归遍历key和value，原因是希望这个标记过程尽量快。
+注意，这里没有对对象所引用的对象进行递归调用reallymarkobject函数进行标记，比如table类型递归遍历key和value，原因是希望这个标记过程尽量快。
 
 
 #### 扫描标记阶段
@@ -108,6 +207,34 @@ lua53中，初始化阶段的入口函数为`restartcollection`, 会调用到`re
 
 `entersweep`函数，如果是当前白色，那么就回收，否则就改变所有对象的标记为白色，准备下一次回收过程。
 
+freeobj 函数，释放掉o对象的内存空间，根据o的不同类型，执行不同的释放内存的方法
+```c
+static void freeobj (lua_State *L, GCObject *o) {
+  switch (o->tt) {
+    case LUA_TPROTO: luaF_freeproto(L, gco2p(o)); break;
+    case LUA_TLCL: {
+      freeLclosure(L, gco2lcl(o));
+      break;
+    }
+    case LUA_TCCL: {
+      luaM_freemem(L, o, sizeCclosure(gco2ccl(o)->nupvalues));
+      break;
+    }
+    case LUA_TTABLE: luaH_free(L, gco2t(o)); break;
+    case LUA_TTHREAD: luaE_freethread(L, gco2th(o)); break;
+    case LUA_TUSERDATA: luaM_freemem(L, o, sizeudata(gco2u(o))); break;
+    case LUA_TSHRSTR:
+      luaS_remove(L, gco2ts(o));  /* remove it from hash table */
+      luaM_freemem(L, o, sizelstring(gco2ts(o)->shrlen));
+      break;
+    case LUA_TLNGSTR: {
+      luaM_freemem(L, o, sizelstring(gco2ts(o)->u.lnglen));
+      break;
+    }
+    default: lua_assert(0);
+  }
+}
+```
 
 ---------------
 ## 参考文章：
@@ -126,3 +253,11 @@ http://www.zenyuhao.com/2017/10/13/lua-gc.html
 
 https://www.e-learn.cn/content/qita/909901
 
+https://liujiacai.net/blog/2018/08/04/incremental-gc/  深入浅出垃圾回收（三）增量式 GC
+
+https://liujiacai.net/blog/2018/07/08/mark-sweep/    深入浅出垃圾回收（二）Mark-Sweep 详析及其优化
+
+https://blog.codingnow.com/2011/04/lua_gc_6.html  Lua GC 的源码剖析 (6) 完结(string的gc细节)
+
+
+https://chenanbao.github.io/2018/07/27/Lua%E8%99%9A%E6%8B%9F%E6%9C%BA%E5%88%9B%E5%BB%BA%E5%88%86%E6%9E%90/
