@@ -10,6 +10,7 @@ TODO list
 weak table 弱表的概念，P143
 ```
 
+
 ## lua的gc算法以及碎片整理
 
 - lua 5.3 使用mark-sweep（后文会介绍 三色增量标记法）
