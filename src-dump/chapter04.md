@@ -1,7 +1,5 @@
 # Chapter04
 
-https://github.com/lymenglei/lua53-codedump
-
 [toc]
 
 

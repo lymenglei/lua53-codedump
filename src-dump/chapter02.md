@@ -1,7 +1,5 @@
 # Chapter02 
 
-https://github.com/lymenglei/lua53-codedump
-
 [toc]
 
 
@@ -11,6 +9,17 @@ https://github.com/lymenglei/lua53-codedump
 
 lua中的字符串全部是引用，相同的字符串只有一份存储（global_State的strt字段）。
 string这部分相对比较独立，可以先拿出来讲一下。主要在lstring.h lstring.c 这两个文件中。
+
+lua中的字符串分为长字符串和短字符串，
+
+#### 区分长字符串和短字符串
+luaS_newlstr 方法是构造一个字符串，在这里有一些判断条件， 用来划分什么样的字符串是长字符串，什么样的字符串是短字符串。
+
+长度不大于40（`#define LUAI_MAXSHORTLEN	40`）即为短字符串，否则为长字符串。
+
+---------------
+
+#### 结构定义
 
 lua中字符串数据结构的定义 在文件lobject中，
 ```c
@@ -246,10 +255,6 @@ static TString *internshrstr (lua_State *L, const char *str, size_t l) {
 调用createstrobj申请一块内存空间，存放字符串，并且把串到链表的表头。
 
 
-#### 区分长字符串和短字符串
-luaS_newlstr 方法是构造一个字符串，在这里有一些判断条件， 用来划分什么样的字符串是长字符串，什么样的字符串是短字符串。
-
-长度不大于40（`#define LUAI_MAXSHORTLEN	40`）即为短字符串，否则为长字符串。
 
 #### 字符串缓存
 
