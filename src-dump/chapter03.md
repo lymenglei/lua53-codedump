@@ -1,5 +1,7 @@
 # Chapter03
 
+https://github.com/lymenglei/lua53-codedump
+
 [toc]
 
 ## table
@@ -19,6 +21,8 @@ typedef struct Node {
   TKey i_key;
 } Node;
 ```
+
+
 
 对于TKey，任何时候只有两种类型，要么是整数，要么不是整数(not nil)
 next字段在之前版本是指针，5.3版本换成了偏移，指向下一个偏移的节点
@@ -101,6 +105,9 @@ hash部分，则通过`setnodevector`函数来调整。（这个函数在resize�
 -------------------------------
 
 #### 向table中插入一个元素
+
+
+![hash2](./pic/c03_6.png)
 
 这个函数比较长，下面慢慢说。其中一些简单的宏定义就不说明了，基本上lua源码里的宏都还算很好理解。
 
@@ -585,7 +592,7 @@ print(#test1) -- 0
 
 -----------------
 
-#### 遍历，pairs ipairs  TODO
+#### 遍历，pairs ipairs  
 
 ```c
 int luaH_next (lua_State *L, Table *t, StkId key) {
@@ -677,14 +684,14 @@ LUA_API int lua_next (lua_State *L, int idx) {
 ```
 其中上述代码中`_f`即为`lua_next`, 函数的内部会调用`luaH_next`
 
-luaH_next 每次 传入一个table，一个key值，在迭代方法里，每次通过上一个key值，来找下一个key，直到找到的key值为空时，跳出循环。（初始的key是啥？？）
+luaH_next 每次 传入一个table，一个key值，在迭代方法里，每次通过上一个key值，来找下一个key，直到找到的key值为空时，跳出循环。
 
-
+初始迭代的key值，分别为0和nil
 
 
 -----------------
 
-#### 插入一个key TODO
+#### 插入一个key
 
 `lua_settable` 这个函数是从C调过来的。会调用到`luaV_settable`这个宏。
 它会优先调用`luaV_fastset`，如果luaV_fastset返回false，那么会调用`luaV_finishset`。
@@ -696,7 +703,79 @@ luaH_next 每次 传入一个table，一个key值，在迭代方法里，每次�
 
 -----------------
 
-#### 删除key TODO
+#### 删除key
+
+例如如下的代码，
+```lua
+local a = { key = 1}
+a.key = nil
+```
+解析成字节码如下：
+```
+$ ./luac.exe -l -p a.lua
+
+main <a.lua:0,0> (4 instructions at 0045e840)
+0+ params, 2 slots, 1 upvalue, 1 local, 3 constants, 0 functions
+        1       [2]     NEWTABLE        0 0 1
+        2       [2]     SETTABLE        0 -1 -2 ; "key" 1
+        3       [3]     SETTABLE        0 -1 -3 ; "key" nil
+        4       [3]     RETURN          0 1
+```
+可以看到执行了`SETTABLE`这个OP_CODE，在代码中搜索，最后在`lvm.c`中找到。
+```c
+vmcase(OP_SETTABLE) {
+  TValue *rb = RKB(i);
+  TValue *rc = RKC(i);
+  settableProtected(L, ra, rb, rc);
+  vmbreak;
+}
+```
+其中宏定义如下:
+```c
+/* same for 'luaV_settable' */
+#define settableProtected(L,t,k,v) { const TValue *slot; \
+  if (!luaV_fastset(L,t,k,slot,luaH_get,v)) \
+    Protect(luaV_finishset(L,t,k,v,slot)); }
+
+
+
+/*
+** Fast track for set table. If 't' is a table and 't[k]' is not nil,
+** call GC barrier, do a raw 't[k]=v', and return true; otherwise,
+** return false with 'slot' equal to NULL (if 't' is not a table) or
+** 'nil'. (This is needed by 'luaV_finishget'.) Note that, if the macro
+** returns true, there is no need to 'invalidateTMcache', because the
+** call is not creating a new entry.
+*/
+#define luaV_fastset(L,t,k,slot,f,v) \
+  (!ttistable(t) \
+   ? (slot = NULL, 0) \
+   : (slot = f(hvalue(t), k), \
+     ttisnil(slot) ? 0 \
+     : (luaC_barrierback(L, hvalue(t), v), \
+        setobj2t(L, cast(TValue *,slot), v), \
+        1)))
+```
+可以看到，最后是将rc这个TValue类型的对象设置进去了，所以`a.key = nil`这样一行代码并不是简单的将`tt_`字段修改，而是修改了整个key值对应的TValue对象。
+
+------
+
+下面是一些库函数中，设置某个键为nil值的方法。例如`table.remove(t, index)`
+
+`lua_pushnil` 在代码中有很多处引用，基本上都在 xxxlib.c文件中，比如将一个对象转换成数字，会调用到`luaB_tonumber`接口，当转换失败之后，会调用lua_pushnil，操作L （lua_State对象）的栈顶对象。而会调用到setnilvalue，只是将这个对象的tt_字段标记为LUA_TNIL。
+
+
+```c
+#define setnilvalue(obj) settt_(obj, LUA_TNIL)
+
+LUA_API void lua_pushnil (lua_State *L) {
+  lua_lock(L);
+  setnilvalue(L->top);
+  api_incr_top(L);
+  lua_unlock(L);
+}
+```
+
 
 
 ---------------------------------------
@@ -731,7 +810,7 @@ LUAMOD_API int luaopen_table (lua_State *L) {
 }
 ```
 看到上面的代码就有种很熟悉的感觉，这样写与 将C/C++函数的接口暴露给lua去调用非常相似：
-下面的代码来自：[github](https://github.com/lymenglei/xlnt/blob/master/menglei/test.cpp)
+
 ```c++
 lua_State* L = luaL_newstate(); 
 luaL_openlibs(L);

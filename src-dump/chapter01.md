@@ -1,7 +1,7 @@
 # Charpter01
 
-如果文章有遗漏或者不准确的地方，欢迎指出
-联系：ly-menglei@163.com
+源码以lua5.3.3进行分析。更多版本源码下载请访问官网 https://www.lua.org/ftp/ 
+
 https://github.com/lymenglei/lua53-codedump
 
 目录：
@@ -20,12 +20,40 @@ https://github.com/lymenglei/lua53-codedump
 
 ## lua对象模型的基础介绍
 
+Lua 8种数据类型
 
+```
+nil （以下5种是以值的形式存在）
+boolean 
+number 
+userdata （full userdata）
+lightuserdata (它不算lua的基本类型)
+
+string (下面4中在vm中以引用方式共享)
+table 
+function 
+thread 
+```
+下面介绍些lua的C源码中，常见的数据结构
 
 #### GCObject Value TValue
 
 lobject.h 72行，迎来了首个比较重要的数据结构`GCObject`，另外`CommonHeader`中的tt字段，可以理解为是用来标记lua 8种数据类型，故：
 ```c
+/*
+** Common Header for all collectable objects (in macro form, to be
+** included in other objects)
+*/
+// 所有需要GC操作的数据都会加一个CommonHeader类型的宏定义
+// next指向下一个GC链表的数据
+// tt代表数据的类型以及扩展类型以及GC位的标志
+// marked是执行GC的标记为，用于具体的GC算法
+#define CommonHeader	GCObject *next; lu_byte tt; lu_byte marked
+
+struct GCObject {
+  CommonHeader;
+};
+
 // 展开之后
 struct GCObject {
     GCObject * next;
@@ -35,7 +63,7 @@ struct GCObject {
 ```
 
 
-下面迎来了另外一个非常重要的数据结构，`Value`
+另外一个非常重要的数据结构，`Value`
 ```c
 typedef union Value {
   GCObject *gc;    /* collectable objects */
@@ -46,8 +74,8 @@ typedef union Value {
   lua_Number n;    /* float numbers */
 } Value;
 ```
-从注释也能看出来，Value类型是一个联合体，其中gc指针，把所有的GCObject串起来，这个在后面垃圾回收（gc）的时候会用到
-其中p字段表示的是light userdata，下面插播介绍下light userdata 和 userdata的区别：
+Value类型是一个联合体，其中gc指针，把所有的GCObject串起来，这个在后面垃圾回收（gc）的时候会用到
+其中p字段表示的是light userdata，下面介绍下light userdata 和 userdata的区别：
 
 ```
 Userdata represent C values in Lua. A light userdata represents a pointer . It is a value (like a number)  
@@ -93,7 +121,7 @@ typedef struct lua_TValue
 后面介绍的 字符串 全部都保存在global_State的strt这个hash表中
 
 
-#### 通用的申请内存空间函数
+#### 内存分配函数
 在global_State中，有个字段
 ```c
 lua_Alloc frealloc;  /* function to reallocate memory */
@@ -174,17 +202,26 @@ void *realloc (void *ptr, size_t new_size );
 #### 字节码
 > luac.exe -l -p xxx.lua
 
-来查看xxx.lua 编译的字节码是什么格式的
+来查看xxx.lua 编译的字节码是什么格式的，其中lua的源码如下：
+
+```lua
+
+local a = { key = 1}
+a.key = nil
+```
+
 
 ```
 menglei@menglei-PC MINGW64 /d/software/lua-5.3.3_Win32_bin
-$ ./luac.exe -p -l a.lua
+$ ./luac.exe -l -p a.lua
 
-main <a.lua:0,0> (3 instructions at 00ab21d0)
-0+ params, 2 slots, 1 upvalue, 2 locals, 1 constant, 0 functions
-        1       [2]     LOADNIL         0 0
-        2       [3]     LOADK           1 -1    ; 4
-        3       [3]     RETURN          0 1
+main <a.lua:0,0> (4 instructions at 0045e840)
+0+ params, 2 slots, 1 upvalue, 1 local, 3 constants, 0 functions
+        1       [2]     NEWTABLE        0 0 1
+        2       [2]     SETTABLE        0 -1 -2 ; "key" 1
+        3       [3]     SETTABLE        0 -1 -3 ; "key" nil
+        4       [3]     RETURN          0 1
+
 ```
 
 

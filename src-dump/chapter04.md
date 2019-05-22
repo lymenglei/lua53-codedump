@@ -1,5 +1,7 @@
 # Chapter04
 
+https://github.com/lymenglei/lua53-codedump
+
 [toc]
 
 
@@ -150,7 +152,7 @@ Proto *luaF_newproto (lua_State *L) {
 
 
 从lua5.1开始，使用了三色增量标记清除算法。
-它不必在要求GC一次性扫描完所有的对象，这个GC过程可以是增量的，可以被终端再恢复并继续进行
+它不必在要求GC一次性扫描完所有的对象，这个GC过程可以是增量的，可以被终止再恢复并继续进行
 
 
 伪代码：
@@ -175,6 +177,7 @@ Proto *luaF_newproto (lua_State *L) {
 		重新加入对象链表中等待下一轮GC
 ```
 ![三色标记法](pic/c04_01.gif)
+
 
 
 那么这样会有一个问题，没有被引用的对象在扫描过程之中颜色不变，如果一个对象在gc过程标记阶段之后创建，它应该是白色，这样在回收阶段，这个对象就会被认为没有引用而被回收掉。
@@ -234,6 +237,22 @@ static void freeobj (lua_State *L, GCObject *o) {
   }
 }
 ```
+
+------------------------------
+#### 思考？
+
+1. 在删除一个key的时候，为什么不能增加一个新的key？数组部分或者hash部分大小要变化？
+
+
+2. 当一个字符串key，在table里对应的value置空，那么key有释放吗？
+```lua
+local t { "ddd" = 111}
+t["ddd"] = nil
+```
+当执行xxx = nil的时候，table的hash部分，这个key值依旧存在，当插入一个新节点，如果计算出来的mainposition值相同，那么会覆盖掉，另外在触发resize的时候，也会释放掉这个空的value对应的key值
+两个值指向同一个地址
+
+a = t.ddd
 
 ---------------
 ## 参考文章：
