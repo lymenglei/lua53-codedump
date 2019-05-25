@@ -55,7 +55,8 @@ typedef union UTString {
   TString tsv;
 } UTString;
 ```
-
+UserData在lua中和string类似，可以看成是拥有独立元表，不被内部化，也不需要追加\0的字符串
+故定义了一个这样的联合体，L_Umaxalign字段在UData中也有类似的声明。
 
 
 ![lua string](./pic/c02_01.png)
@@ -265,6 +266,12 @@ static TString *internshrstr (lua_State *L, const char *str, size_t l) {
 
 
 #### 字符串缓存
+
+这个函数是构造一个字符串的入口函数。
+每当构造一个字符串类型对象时，先去strcache中去查找，若没有找到，那么就会调用`luaS_newlstr`来创建新的字符串。
+luaS_newlstr函数中根据字符串的长度，来区分长字符串还是短字符串，然后调用不同的构造方法，来构造字符串。
+其中在构造短字符串，会先去hash链表中去查找有没有相同的字符串，而对于长字符串则没有做重复检查，也就是长字符串是有可能重复的。
+最后都会调用到`createstrobj`函数，创建一个TString对象，连接到allgc的表头。
 
 ```c
 TString *luaS_new (lua_State *L, const char *str) {

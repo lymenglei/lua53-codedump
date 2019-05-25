@@ -12,7 +12,7 @@ typedef union TKey {
   struct {
     TValuefields;
     int next;  /* for chaining (offset for next node) */
-  } nk;
+  } nk; // node key
   TValue tvk;
 } TKey;
 
@@ -27,7 +27,7 @@ typedef struct Node {
 对于TKey，任何时候只有两种类型，要么是整数，要么不是整数(not nil)
 next字段在之前版本是指针，5.3版本换成了偏移，指向下一个偏移的节点
 
-Node是table的节点值。
+Node是table的hash部分节点值。
 
 然后是真正的`table`类型的定义：
 
@@ -102,6 +102,19 @@ gco2t最后会调用到cast_u这个宏
 hash部分，则通过`setnodevector`函数来调整。（这个函数在resize时候还会提到）
 初始化时候size为0，node指向了一个dummynode，hash部分的size也是0，lastfree是个空指针。
 
+
+
+#### 插入一个key
+
+`lua_settable` 这个函数是从C调过来的。会调用到`luaV_settable`这个宏。
+它会优先调用`luaV_fastset`，如果luaV_fastset返回false，那么会调用`luaV_finishset`。
+
+插入一个key，先会去这个table里查这个key是否存在，如果存在，就重新设置新的值。
+否则会先去找这个table里面有没有元表，没有元表并且上步查找key对应的slot是一个luaO_nilobject，那么就设置一个新的值。如果有元表，那么就去执行元表的方法。
+
+最后就会调用到下面的函数`luaH_newkey`
+
+
 -------------------------------
 
 #### 向table中插入一个元素
@@ -110,6 +123,7 @@ hash部分，则通过`setnodevector`函数来调整。（这个函数在resize�
 ![hash2](./pic/c03_6.png)
 
 这个函数比较长，下面慢慢说。其中一些简单的宏定义就不说明了，基本上lua源码里的宏都还算很好理解。
+luaH_newkey方法返回一个节点的指针，这个节点的指针即为key对应的value节点。
 
 ```c
 TValue *luaH_newkey (lua_State *L, Table *t, const TValue *key) {
@@ -220,7 +234,7 @@ static Node *mainposition (const Table *t, const TValue *key) {
 
 #### table的rehash
 
-触发table 做rehash 操作的地方只有在向table中插入一个新key的时候，会调用`getfreepos`来寻找一个可用的位置，当这个函数返回空的时候，才进行rehash操作，也就是hash部分全部填满？？？
+触发table 做rehash 操作的地方只有在向table中插入一个新key的时候，会调用`getfreepos`来寻找一个可用的位置，当这个函数返回空的时候，才进行rehash操作，也就是hash部分全部填满
 ```c
 static Node *getfreepos (Table *t) {
   if (!isdummy(t)) {
@@ -308,10 +322,15 @@ tbl[3] = 0
 tbl[4] = 0
 tbl[5] = 0
 ```
-查找过程如下表格（*pna = 4）
+查找过程如下表格（对应上述代码段，*pna = 4）
 
-|  i |  区间 | a的值 | 条件(a > twotoi/2)  |  optimal数组长度 | key |
+其中a的值为，key的个数每次累加的结果。
+twotoi在每次循环都*2
+
+
+|  i |  区间 | a的值(key的个数) | 条件(a > twotoi/2)  |  optimal数组长度 | key |
 |----|-------| ------- | ------| --------|--------|
+ n  | (2^(n-1), 2^n] | 
  0  |  (0, 1] | 0  | 0 > 1/2 不成立 | 0 |
  1  |  (1, 2] | 1  | 1 > 2/2 不成立 | 0 | 2
  2  |  (2, 4] | 3  | 3 > 4/2 成立   | 4 | 2,3,4
@@ -687,18 +706,6 @@ LUA_API int lua_next (lua_State *L, int idx) {
 luaH_next 每次 传入一个table，一个key值，在迭代方法里，每次通过上一个key值，来找下一个key，直到找到的key值为空时，跳出循环。
 
 初始迭代的key值，分别为0和nil
-
-
------------------
-
-#### 插入一个key
-
-`lua_settable` 这个函数是从C调过来的。会调用到`luaV_settable`这个宏。
-它会优先调用`luaV_fastset`，如果luaV_fastset返回false，那么会调用`luaV_finishset`。
-
-插入一个key，先会去这个table里查这个key是否存在，如果存在，就重新设置新的值。
-否则会先去找这个table里面有没有元表，没有元表并且上步查找key对应的slot是一个luaO_nilobject，那么就设置一个新的值。如果有元表，那么就去执行元表的方法。
-
 
 
 -----------------

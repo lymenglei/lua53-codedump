@@ -125,6 +125,73 @@ Proto *luaF_newproto (lua_State *L) {
 
 ```
 
+## 字符串和userdata
+
+
+TString下面，又封装了一层
+
+```c
+typedef struct TString {
+  CommonHeader;
+  lu_byte extra;  /* reserved words for short strings; "has hash" for longs */
+  lu_byte shrlen;  /* length for short strings */
+  unsigned int hash;
+  union {
+    size_t lnglen;  /* length for long strings */
+    struct TString *hnext;  /* linked list for hash table */
+  } u;
+} TString;
+
+
+/*
+** Ensures that address after this type is always fully aligned.
+*/
+typedef union UTString {
+  L_Umaxalign dummy;  /* ensures maximum alignment for strings */
+  TString tsv;
+} UTString;
+```
+
+类似的，对于userdata类型，也有一个对应的结构，
+
+```c
+typedef struct Udata {
+  CommonHeader;
+  lu_byte ttuv_;  /* user value's tag */
+  struct Table *metatable;
+  size_t len;  /* number of bytes */
+  union Value user_;  /* user value */
+} Udata;
+
+typedef union UUdata {
+  L_Umaxalign dummy;  /* ensures maximum alignment for 'local' udata */
+  Udata uv;
+} UUdata;
+
+```
+UserData在lua中和string类似，可以看成是拥有独立元表，不被内部化，也不需要追加\0的字符串
+
+
+再看获取`字符串`和`userdata`那块内存的宏。
+```c
+/*
+** Get the actual string (array of bytes) from a 'TString'.
+** (Access to 'extra' ensures that value is really a 'TString'.)
+*/
+#define getstr(ts)  \
+  check_exp(sizeof((ts)->extra), cast(char *, (ts)) + sizeof(UTString))
+
+
+/*
+**  Get the address of memory block inside 'Udata'.
+** (Access to 'ttuv_' ensures that value is really a 'Udata'.)
+*/
+#define getudatamem(u)  \
+  check_exp(sizeof((u)->ttuv_), (cast(char*, (u)) + sizeof(UUdata)))
+```
+
+两者的类型很相似。其中dummy字段，是用来保证最大程度的内存对齐
+
 
 ## GC Garbage Collect
 
