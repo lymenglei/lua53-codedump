@@ -14,7 +14,7 @@
 2. 闭包，回调，onClick这个东西是如何存储等等，什么时候释放内存 // 闭包done  -->
 
 
-<!-- [弱表的概念](https://www.runoob.com/manual/lua53doc/manual.html#2.5.2) -->
+[弱表的概念](https://www.runoob.com/manual/lua53doc/manual.html#2.5.2)
 
 #### Tri-Color Incremental Mark & Sweep
 - 三色增量标记法状态变化图
@@ -174,8 +174,8 @@ void *luaM_realloc_ (lua_State *L, void *block, size_t osize, size_t nsize) {
 */
 ```
 
-`lua_state`本质就是一个线程本质上没有什么特殊性
-1. 要注意的是, 和nil, string, table一样, lua_State也是lua中的一种基本类型, lua中的表示是TValue {value = lua_State, tt = LUA_TTHREAD}
+`lua_state`本质就是一个`LUA_TTHREAD`本质上没有什么特殊性
+1. 和nil, string, table一样, lua_State也是lua中的一种基本类型, lua中的表示是TValue {value = lua_State, tt = LUA_TTHREAD}
 2. lua_State的成员和功能
   - 栈的管理, 包括管理整个栈和当前函数使用的栈的情况.
   - CallInfo的管理, 包括管理整个CallInfo数组和当前函数的CallInfo.
@@ -540,7 +540,7 @@ case GCScallfin: {  /* call remaining finalizers */
 还有一点需要注意的是当设置原表的时候__gc方法就必须存在了，否则在后面再加也是不生效的。
 大致的流程是：
 ```txt
-       lua_setmetatable                 GCTM                        separatetobefnz
+       lua_setmetatable                 separatetobefnz                        GCTM
   allgc -------------------> finobj -------------------> tobefnz -------------------> allgc
 ```
 ```c
