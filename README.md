@@ -2,8 +2,9 @@
 lua53 源码阅读笔记
 
 
-有时间就会继续填坑
-
-目前string table 基本上已经摸清楚了
-
-闭包 函数 等还需要时间去抠
+- chapter01 - lua对象模型的基础介绍
+- chapter02 - lua字符串
+- chapter03 - table
+- chapter04 - lua垃圾回收简述
+- chapter05 - GC详述
+- chapter06 - lua闭包
