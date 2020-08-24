@@ -45,6 +45,9 @@ typedef struct TString {
 - `lnglen` 长字符串长度
 
 
+其中`extra`字段，可以参考`getstr(ts)`这个宏，这里面先是尝试访问ts->extra字段，来确保ts是真正的TString类型
+
+
 紧接着TString,定义了`UTString`类型
 ```c
 /*
