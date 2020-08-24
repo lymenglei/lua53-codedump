@@ -58,23 +58,17 @@ typedef union UTString {
   TString tsv;
 } UTString;
 ```
-UserData在lua中和string类似，可以看成是拥有独立元表，不被内部化，也不需要追加\0的字符串
+UserData在lua中和string类似，可以看成是拥有独立元表，不被内部化，也不需要追加\0的字符串（字符串需要加\0）
 故定义了一个这样的联合体，L_Umaxalign字段在UData中也有类似的声明。
 
-
-![lua string](./pic/c02_01.png)
-
-lua 字符串在内存中的表示如上图（[图片来自博客](https://www.cnblogs.com/heartchord/p/4561308.html)）
-
-
-lua中的字符串的存储结构 如下图：
-
-![lua string](./pic/c02_2.png)
+关于UserData会在后面有更多说明。
 
 
 -----------------------
 
 #### 构造一个lua字符串的一般方法
+
+> 通过构造字符串的方法，来看字符串在lua虚拟机中的存储结构
 
 lstring.c createstrobj 方法会构造出来一个新的字符串，其函数原型如下：
 
@@ -107,10 +101,10 @@ static TString *createstrobj (lua_State *L, size_t l, int tag, unsigned int h){
 #define sizelstring(l)  (sizeof(union UTString) + ((l) + 1) * sizeof(char))
 ```
 
-求一个UTString的大小+ （l+1）个char类型的内存空间大小。TString对象之后的内存空间，存储了真正的字符串的内容。
+求一个UTString的大小+ （l+1）个char类型的内存空间大小`(1表示字符串结尾\0)`。TString对象之后的内存空间，存储了真正的字符串的内容。
 
 
-`luaC_newobj`这个函数在后面也会有很多地方用到，创建一个可以回收的对象，并且把这个对象添加到g->allgc表头
+`luaC_newobj`这个函数在后面也会有很多地方用到，创建一个可以回收的对象，并且把这个对象添加到g->allgc表头。
 
 ```c
 /*
@@ -165,40 +159,6 @@ TString *luaS_createlngstrobj (lua_State *L, size_t l) {
 注意，hash 长字符串和短字符串的哈希方法不同
 
 
-#### 字符串的hash算法
-
-```c
-unsigned int luaS_hash (const char *str, size_t l, unsigned int seed) {
-  unsigned int h = seed ^ cast(unsigned int, l);
-  size_t step = (l >> LUAI_HASHLIMIT) + 1;
-  for (; l >= step; l -= step)
-    h ^= ((h<<5) + (h>>2) + cast_byte(str[l - 1]));
-  return h;
-}
-```
-对于比较长的字符串（32字节以上），为了加快哈希过程，计算字符串哈希值是跳跃进行的。跳跃的步长（step）是由LUAI_HASHLIMIT宏控制的。
-
-```c
-/*
-** Lua will use at most ~(2^LUAI_HASHLIMIT) bytes from a string to
-** compute its hash
-*/
-#if !defined(LUAI_HASHLIMIT)
-#define LUAI_HASHLIMIT		5
-#endif
-```
-
-```
-Hash DoS攻击：攻击者构造出上千万个拥有相同哈希值的不同字符串，用来数十倍地降低Lua从外部压入字符串到内部字符串表的效率。当Lua用于大量依赖字符串处理的服务（例如HTTP）的处理时，输入的字符串将不可控制， 很容易被人恶意利用 。
-
-为了防止Hash DoS攻击的发生，Lua一方面将长字符串独立出来，大文本的输入字符串将不再通过哈希内部化进入全局字符串表中；另一方面使用一个随机种子用于字符串哈希值的计算，使得攻击者无法轻易构造出拥有相同哈希值的不同字符串。
-
-随机种子是在创建虚拟机的global_State（全局状态机）时构造并存储在global_State中的。随机种子也是使用luaS_hash函数生成，它利用内存地址随机性以及一个用户可配置的一个随机量（luai_makeseed宏）同时来决定。
-
-用户可以在luaconf.h中配置luai_makeseed来定义自己的随机方法，Lua默认是利用time函数获取系统当前时间来构造随机种子。luai_makeseed的默认行为有可能给调试带来一些困扰： 由于字符串hash值的不同，程序每次运行过程中的内部布局将有一些细微变化，不过字符串池使用的是开散列算法， 这个影响将非常小。如果用户希望让嵌入Lua的程序每次运行都严格一致，那么可以自定义luai_makeseed函数来实现。
-```
-
-
 #### 构造一个短字符串
 直接看代码吧
 
@@ -247,7 +207,7 @@ static TString *internshrstr (lua_State *L, const char *str, size_t l) {
 	(check_exp((size&(size-1))==0, (cast(int, (s) & ((size)-1)))))
 ```
 其中size一定是2的n次幂
-当size是2的幂次时，(s) & ((size)-1)) = s % size    只进行了一次与运算。
+当size是2的幂次时，(s) & ((size)-1)) = s % size    只进行了一次`与`运算。
 为什么采取这种hash方式可以参考[博文](https://manistein.github.io/blog/post/program/build-a-lua-interpreter/%E6%9E%84%E5%BB%BAlua%E8%A7%A3%E9%87%8A%E5%99%A8part4/)
 
 
@@ -265,6 +225,60 @@ static TString *internshrstr (lua_State *L, const char *str, size_t l) {
 如果找到了，也就是之前在内存里就有存储，那么返回这个地址。
 如果没有找到，那么就先判断strt还能不能放下，是否需要resize操作，进行扩容。
 调用createstrobj申请一块内存空间，存放字符串，并且把串到链表的表头。
+
+
+----------
+
+**结论：字符串在内存中的结构：**
+
+![lua string](./pic/c02_01.png)
+
+lua 字符串在内存中的表示如上图（[图片来自博客](https://www.cnblogs.com/heartchord/p/4561308.html)）
+
+
+
+lua中的字符串的存储结构 如下图：
+
+其中短字符串存在global_state.strt字段中。而长字符串在调用luaC_newobj方法时，直接串到allgc链表中。
+短字符串由于也是GCObject会链接到allgc中，同时在`internshrstr`函数中可以看到，ts对象被添加到了strt.hash链表中
+
+![lua string](./pic/c02_2.png)
+
+-------------
+
+#### 字符串的hash算法
+
+```c
+unsigned int luaS_hash (const char *str, size_t l, unsigned int seed) {
+  unsigned int h = seed ^ cast(unsigned int, l);
+  size_t step = (l >> LUAI_HASHLIMIT) + 1;
+  for (; l >= step; l -= step)
+    h ^= ((h<<5) + (h>>2) + cast_byte(str[l - 1]));
+  return h;
+}
+```
+对于比较长的字符串（32字节以上），为了加快哈希过程，计算字符串哈希值是跳跃进行的。跳跃的步长（step）是由LUAI_HASHLIMIT宏控制的。
+
+```c
+/*
+** Lua will use at most ~(2^LUAI_HASHLIMIT) bytes from a string to
+** compute its hash
+*/
+#if !defined(LUAI_HASHLIMIT)
+#define LUAI_HASHLIMIT		5
+#endif
+```
+
+```
+Hash DoS攻击：攻击者构造出上千万个拥有相同哈希值的不同字符串，用来数十倍地降低Lua从外部压入字符串到内部字符串表的效率。当Lua用于大量依赖字符串处理的服务（例如HTTP）的处理时，输入的字符串将不可控制， 很容易被人恶意利用 。
+
+为了防止Hash DoS攻击的发生，Lua一方面将长字符串独立出来，大文本的输入字符串将不再通过哈希内部化进入全局字符串表中；另一方面使用一个随机种子用于字符串哈希值的计算，使得攻击者无法轻易构造出拥有相同哈希值的不同字符串。
+
+随机种子是在创建虚拟机的global_State（全局状态机）时构造并存储在global_State中的。随机种子也是使用luaS_hash函数生成，它利用内存地址随机性以及一个用户可配置的一个随机量（luai_makeseed宏）同时来决定。
+
+用户可以在luaconf.h中配置luai_makeseed来定义自己的随机方法，Lua默认是利用time函数获取系统当前时间来构造随机种子。luai_makeseed的默认行为有可能给调试带来一些困扰： 由于字符串hash值的不同，程序每次运行过程中的内部布局将有一些细微变化，不过字符串池使用的是开散列算法， 这个影响将非常小。如果用户希望让嵌入Lua的程序每次运行都严格一致，那么可以自定义luai_makeseed函数来实现。
+```
+
 
 
 
@@ -295,12 +309,12 @@ TString *luaS_new (lua_State *L, const char *str) {
 ```
 网上关于strcache字段讲的不是很多，这是一个二维数组
 TString *strcache[53][2];
-每次new一个字符串的时候，会先去缓存里找，如果没找到，那么就创建一个新的字符串，p[1] = p[0],将原来p[0]位置的字符串放到p[1],并且把新字符串的地址放在p[0]的位置。一种LRU置换算法。
+每次new一个字符串的时候，会先去缓存里找，如果没找到，那么就创建一个新的字符串，p[1] = p[0],将原来p[0]位置的字符串放到p[1],并且把新字符串的地址放在p[0]的位置。
 
 -------------------
 #### resize strt数组
 
-到这里，lua 字符串相关基本上都已经顺利完成了。（还差删除字符串）
+到这里，lua 字符串相关基本上都已经顺利完成了。
 
 我们知道，lua 中的字符串全部保存在global_State的strt字段，另外strcache字段里，保存了一份53*2个字符串的缓存，下面就分析下strt字段，是如何进行resize的。
 
@@ -373,7 +387,7 @@ for (i = 0; i < tb->size; i++) {  /* rehash */
 最后，修改 tb->size 为新的大小。
 
 #### 字符串的比较
-先去分长短字符串，然后在根据不同的策略去比较
+先区分长短字符串，然后在根据不同的策略去比较
 
 在函数`luaV_equalobj`中
 ```c
@@ -407,7 +421,13 @@ luaV_concat 这个函数，拼接字符串都会生成一个新的字符串
 
 table.concat函数就提供了一个相对较好的性能，实测（xlnt库 + lua），使用`..`来拼接导出道具表，耗时60.119s，而使用`table.concat`来拼接所有的字符串时，耗时10.119s。将表load到内存占据了主要时间，可见table.concat方法拼接大量字符串还是很快的。
 
-源码中使用了一个`luaL_Buffer`缓存
+源码中使用了一个`luaL_Buffer`缓存，这个buffer的大小为
+```c
+#define LUAL_BUFFERSIZE		8192
+```
+
+
+
 ```c
 static int tconcat (lua_State *L) {
   luaL_Buffer b;
