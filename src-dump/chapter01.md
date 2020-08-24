@@ -80,7 +80,7 @@ Value类型是一个联合体，其中gc指针，把所有的GCObject串起来�
 ```
 Userdata represent C values in Lua. A light userdata represents a pointer . It is a value (like a number)  
 ```
-上面这句话是 lua 官网对二者的描述，从这里能看出来 light userdata实际上就是一个C指针，它的生命周期有C/C++控制，而userdata可以理解为，C/C++对象，创建是在lua里创建，内存的释放也是lua虚拟机来进行管理的。
+上面这句话是 lua 官网对二者的描述，从这里能看出来 light userdata实际上就是一个C指针，它的生命周期由C/C++控制，而userdata可以理解为，C/C++对象，创建是在lua里创建，内存的释放也是lua虚拟机来进行管理的。
 
 接着上面的`Value`联合体说，b字段用来标示bool值，f字段是跟lua51版本比，新增加出来的一个字段
 
